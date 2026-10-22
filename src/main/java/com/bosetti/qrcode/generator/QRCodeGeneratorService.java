@@ -1,66 +1,161 @@
 package com.bosetti.qrcode.generator;
 
-import ch.qos.logback.core.util.StringUtil;
 import com.google.zxing.BarcodeFormat;
+import com.google.zxing.EncodeHintType;
 import com.google.zxing.MultiFormatWriter;
-import com.google.zxing.WriterException;
-import com.google.zxing.client.j2se.MatrixToImageWriter;
 import com.google.zxing.common.BitMatrix;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.google.zxing.client.j2se.MatrixToImageWriter;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import java.io.File;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
-import java.util.Date;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
 
 @Service
 public class QRCodeGeneratorService {
 
-    private static final Logger log = LoggerFactory.getLogger(QRCodeGeneratorService.class);
-    @Value("${qrcode.output.directory}")
-    private String outputLocation;
+    @Value("${qrcode.output.directory:${user.home}/Downloads}")
+    private String outputDirectory;
 
-    private static final String charset = "UTF-8";
-    private static final String strDateFormat = "yyyyMMddhhmmss";
+    public byte[] generate(QRCodeRequest request) throws Exception {
+        String content = buildContent(request);
 
-    public void generateQRCode(String message){
-        log.info("### Generating QRCode ###");
+        Map<EncodeHintType, Object> hints = new HashMap<>();
+        hints.put(EncodeHintType.CHARACTER_SET, "UTF-8");
+        hints.put(EncodeHintType.MARGIN, 2);
 
-        log.info("Output directory - {}",outputLocation);
+        BitMatrix matrix = new MultiFormatWriter().encode(
+                content,
+                BarcodeFormat.QR_CODE,
+                400,
+                400,
+                hints
+        );
 
-        try{
-            String finalMessage = (StringUtil.notNullNorEmpty(message))?message:"";
-            log.info("Final Input Message - {}",finalMessage);
-            processQRCode(finalMessage,prepareOutputFileName(),charset, 400, 400);
-        } catch (WriterException e) {
-            e.printStackTrace();
-        } catch (IOException e){
-            e.printStackTrace();
-        }
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        MatrixToImageWriter.writeToStream(matrix, "PNG", output);
+
+        byte[] image = output.toByteArray();
+        saveImage(image);
+
+        return image;
     }
-    private String prepareOutputFileName(){
-        Date date = new Date();
 
-        DateFormat dateFormat = new SimpleDateFormat(strDateFormat);
-        String formattedDate = dateFormat.format(date);
+    private void saveImage(byte[] image) throws IOException {
+        Path directory = Paths.get(outputDirectory)
+                .toAbsolutePath()
+                .normalize();
 
-        StringBuilder sb = new StringBuilder();
-        sb.append(outputLocation).append("/").append("QRCode-").append(formattedDate).append(".png");
-        log.info("Final output file - "+sb.toString());
-        File dir = new File(outputLocation);
-        if (!dir.exists()) {
-            boolean created = dir.mkdirs();
-            log.info("Output directory created: {}", created);
+        Files.createDirectories(directory);
+
+        String timestamp = LocalDateTime.now().format(
+                DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS")
+        );
+
+        Path file = directory.resolve("QRCode-" + timestamp + ".png");
+
+        Files.write(file, image);
+
+        System.out.println("QR Code salvo em: " + file);
+    }
+
+    private String buildContent(QRCodeRequest request) {
+        if (request == null || request.type() == null) {
+            throw new IllegalArgumentException(
+                    "Selecione o tipo de QR Code."
+            );
         }
 
-        return sb.toString();
-
+        return switch (request.type().toLowerCase(Locale.ROOT)) {
+            case "url" -> buildUrl(request.url());
+            case "wifi" -> buildWifi(request);
+            default -> throw new IllegalArgumentException(
+                    "Tipo inválido. Use url ou wifi."
+            );
+        };
     }
-    private void processQRCode(String data,String path, String charset, int height,int width) throws WriterException, IOException {
-        BitMatrix matrix = new MultiFormatWriter().encode(new String(data.getBytes(charset),charset),BarcodeFormat.QR_CODE, width,height);
-        MatrixToImageWriter.writeToFile(matrix,path.substring(path.lastIndexOf('.')+1),new File(path));
+
+    private String buildUrl(String url) {
+        if (url == null || url.isBlank()) {
+            throw new IllegalArgumentException("Informe um link.");
+        }
+
+        url = url.trim();
+
+        if (!url.matches("(?i)^https?://.*")) {
+            url = "https://" + url;
+        }
+
+        try {
+            java.net.URI uri = java.net.URI.create(url);
+
+            if (uri.getHost() == null ||
+                    !("http".equalsIgnoreCase(uri.getScheme())
+                    || "https".equalsIgnoreCase(uri.getScheme()))) {
+                throw new IllegalArgumentException();
+            }
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Informe uma URL válida.");
+        }
+
+        return url;
+    }
+
+    private String buildWifi(QRCodeRequest request) {
+        String ssid = request.ssid();
+        String password = request.password() == null
+                ? "" : request.password();
+        String security = request.security();
+
+        if (ssid == null || ssid.isBlank()) {
+            throw new IllegalArgumentException(
+                    "Informe o nome da rede."
+            );
+        }
+
+        if (security == null) {
+            throw new IllegalArgumentException(
+                    "Selecione a segurança."
+            );
+        }
+
+        security = security.toUpperCase(Locale.ROOT);
+
+        if (!security.equals("WPA")
+                && !security.equals("WEP")
+                && !security.equals("NOPASS")) {
+            throw new IllegalArgumentException(
+                    "Segurança inválida."
+            );
+        }
+
+        if (security.equals("NOPASS")) {
+            security = "nopass";
+            password = "";
+        } else if (password.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Informe a senha do Wi-Fi."
+            );
+        }
+
+        return "WIFI:T:" + security
+                + ";S:" + escapeWifi(ssid)
+                + ";P:" + escapeWifi(password)
+                + ";;";
+    }
+
+    private String escapeWifi(String value) {
+        return value.replace("\\", "\\\\")
+                .replace(";", "\\;")
+                .replace(",", "\\,")
+                .replace(":", "\\:")
+                .replace("\"", "\\\"");
     }
 }

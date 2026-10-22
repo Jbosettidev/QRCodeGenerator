@@ -1,20 +1,41 @@
 package com.bosetti.qrcode.generator;
 
-import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import static com.bosetti.qrcode.generator.QRCodeGeneratorApplication.log;
 
 @RestController
-
+@RequestMapping("/api/qrcode")
 public class QRCodeController {
 
-    @Autowired
-    QRCodeGeneratorService qrCodeGeneratorService;
+    private final QRCodeGeneratorService service;
 
-    @PostMapping("/qrcode")
-    public String addCustomer(@RequestBody String message){
-        log.info("Input Message is {} ",message);
-        qrCodeGeneratorService.generateQRCode(message);
-        return "Created Qr Code";
+    public QRCodeController(QRCodeGeneratorService service) {
+        this.service = service;
+    }
+
+    @PostMapping(
+            consumes = MediaType.APPLICATION_JSON_VALUE,
+            produces = MediaType.IMAGE_PNG_VALUE
+    )
+    public ResponseEntity<byte[]> generate(
+            @RequestBody QRCodeRequest request
+    ) throws Exception {
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_PNG)
+                .body(service.generate(request));
+    }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<String> handleInvalidInput(
+            IllegalArgumentException exception
+    ) {
+        return ResponseEntity.badRequest().body(exception.getMessage());
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<String> handleError(Exception exception) {
+        return ResponseEntity.internalServerError()
+                .body("Não foi possível gerar o QR Code.");
     }
 }

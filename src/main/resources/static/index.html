@@ -1,0 +1,241 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QRCode Generator</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background: #10141c;
+            color: #f1f5f9;
+            font-family: Arial, sans-serif;
+        }
+
+        main {
+            width: 100%;
+            max-width: 480px;
+            padding: 28px;
+            background: #1b2230;
+            border: 1px solid #30394a;
+            border-radius: 16px;
+        }
+
+        h1 {
+            margin-top: 0;
+            font-size: 27px;
+        }
+
+        p {
+            color: #aebbd0;
+            line-height: 1.5;
+        }
+
+        label {
+            display: block;
+            margin-top: 18px;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        input, select, button {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 15px;
+        }
+
+        input, select {
+            color: white;
+            background: #111722;
+            border: 1px solid #3b465a;
+        }
+
+        button {
+            margin-top: 20px;
+            border: none;
+            background: #5c83f6;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #456be0;
+        }
+
+        #result {
+            margin-top: 24px;
+            text-align: center;
+        }
+
+        #qr {
+            display: none;
+            width: 100%;
+            max-width: 300px;
+            margin: 0 auto;
+            padding: 12px;
+            background: white;
+            border-radius: 8px;
+        }
+
+        #download {
+            display: none;
+            text-decoration: none;
+            color: #a9c1ff;
+        }
+
+        #status {
+            overflow-wrap: anywhere;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+<main>
+    <h1>QRCode Generator</h1>
+    <p>Gere QR Codes para links e conexões Wi-Fi.</p>
+
+    <form id="form">
+        <label for="type">Tipo de QR Code</label>
+        <select id="type">
+            <option value="url">Link / URL</option>
+            <option value="wifi">Conectar ao Wi-Fi</option>
+        </select>
+
+        <section id="urlFields">
+            <label for="url">Endereço do site</label>
+            <input
+                id="url"
+                type="text"
+                placeholder="https://exemplo.com"
+            >
+        </section>
+
+        <section id="wifiFields" class="hidden">
+            <label for="ssid">Nome da rede Wi-Fi</label>
+            <input id="ssid" type="text" placeholder="MinhaRede">
+
+            <label for="security">Segurança da rede</label>
+            <select id="security">
+                <option value="WPA">WPA / WPA2 / WPA3</option>
+                <option value="WEP">WEP</option>
+                <option value="nopass">Rede sem senha</option>
+            </select>
+
+            <div id="passwordField">
+                <label for="password">Senha do Wi-Fi</label>
+                <input id="password" type="password"
+                       placeholder="Senha da rede">
+            </div>
+        </section>
+
+        <button type="submit">Gerar QR Code</button>
+    </form>
+
+    <section id="result">
+        <img id="qr" alt="QR Code gerado">
+        <p id="status" role="status"></p>
+        <p>
+            <a id="download" download="qrcode.png">
+                Baixar QR Code PNG
+            </a>
+        </p>
+    </section>
+</main>
+
+<script>
+    const type = document.getElementById("type");
+    const urlFields = document.getElementById("urlFields");
+    const wifiFields = document.getElementById("wifiFields");
+    const security = document.getElementById("security");
+    const passwordField = document.getElementById("passwordField");
+    const form = document.getElementById("form");
+    const qr = document.getElementById("qr");
+    const status = document.getElementById("status");
+    const download = document.getElementById("download");
+
+    let currentImageUrl = null;
+
+    function updateFields() {
+        const isWifi = type.value === "wifi";
+
+        urlFields.classList.toggle("hidden", isWifi);
+        wifiFields.classList.toggle("hidden", !isWifi);
+
+        passwordField.classList.toggle(
+            "hidden",
+            security.value === "nopass"
+        );
+    }
+
+    type.addEventListener("change", updateFields);
+    security.addEventListener("change", updateFields);
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        qr.style.display = "none";
+        download.style.display = "none";
+        status.textContent = "Gerando QR Code...";
+
+        const payload = {
+            type: type.value,
+            url: document.getElementById("url").value,
+            ssid: document.getElementById("ssid").value,
+            password: document.getElementById("password").value,
+            security: security.value
+        };
+
+        try {
+            const response = await fetch("/api/qrcode", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error(await response.text());
+            }
+
+            const blob = await response.blob();
+
+            if (currentImageUrl) {
+                URL.revokeObjectURL(currentImageUrl);
+            }
+
+            currentImageUrl = URL.createObjectURL(blob);
+
+            qr.src = currentImageUrl;
+            qr.style.display = "block";
+
+            download.href = currentImageUrl;
+            download.style.display = "inline-block";
+
+            status.textContent = "QR Code gerado com sucesso!";
+        } catch (error) {
+            status.textContent =
+                error.message || "Erro ao gerar o QR Code.";
+        }
+    });
+
+    updateFields();
+</script>
+</body>
+</html>
